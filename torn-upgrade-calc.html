@@ -1,0 +1,344 @@
+<script
+  src="https://code.jquery.com/jquery-3.1.1.min.js"
+  integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8="
+  crossorigin="anonymous"></script>
+<script
+  src="http://code.jquery.com/ui/1.12.0/jquery-ui.min.js"
+  integrity="sha256-eGE6blurk5sHj+rmkfsGYeKyZx3M4bG+ZlFyA7Kns7E="
+  crossorigin="anonymous"></script>
+<link rel="stylesheet" href="http://code.jquery.com/ui/1.12.0/themes/smoothness/jquery-ui.css">
+<style>
+.tier-list {
+  list-style: none;
+  padding: 0;
+  margin: 5px 0;
+}
+.tier-list li {
+  display: inline-block;
+  height: 20px;
+  width: 20px;
+}
+.tier-list li:before {
+  content: 'O';
+  color: grey;
+}
+.tier-list li.have:before {
+  color: green;
+}
+.tier-list li.avail:before {
+  color: blue;
+}
+.tier-list li.avail.want:before {
+  color: orange;
+}
+h4 {
+  margin: 10px 0 5px;
+}
+.locked {
+  color: grey !important;
+}
+.locked *:before {
+  color: grey !important;
+}
+</style>
+<p>
+  Right now this is functional, not pretty. Copy your API key from your Torn settings and your faction id into the fields below and hit "Pull Data" (note: you must have API Access for your faction to get the data). Then drag/drop the branch list to match what you currently have, with your first one at the top. Then you can reorder the rest to test out some options for your next branch. Change the number of days to see which upgrades are estimated to be available at that time. If you hover an upgrade circle, it will tell you the estimated number of days until it is unlocked. Select the upgrades you would want to have the total respect cost calculated, as well as indicating when the next branch would unlock.
+</p>
+<div>
+  <input type="text" id="apikey" placeholder="API Key">
+  <input type="text" id="factionid" placeholder="Faction ID">
+  <input type="submit" id="getData" name="Pull Data">
+</div>
+<div>
+  Number of days: <input type="number" id="days" value="7">
+</div>
+<ul style="list-style: none;">
+  <li>Current #: <span id="haveCount">0</span></li>
+  <li>Avail #: <span id="availCount">0</span></li>
+  <li>Selected #: <span id="wantCount">0</span></li>
+  <li>Total w/ Selected #: <span id="pretendHaveCount">0</span></li>
+  <li>Current Cost: <span id="haveCost">0</span></li>
+  <li>Selected Upgrade Cost: <span id="wantCost">0</span></li>
+  <li>Total Cost: <span id="totalCost">0</span></li>
+</ul>
+<div id="upgrades"></div>
+<textarea id="debug"></textarea>
+<script>
+$(document).ready(function(){
+  $('#debug').hide();
+  var memo = {};
+
+  $('#getData').click(function(){
+    if( typeof memo.specialistUpgrades === 'undefined' ){
+      $.getJSON('https://api.torn.com/torn/',
+        { selections: 'factiontree', key: $('#apikey').val() },
+        function(data){
+          memo.specialistUpgrades = parseUpgrades(data['upgrades']);
+          drawUpgrades();
+          pullData();
+        }
+      );
+    } else {
+      pullData();
+    }
+  });
+
+  $("#days").change(function(){
+    var days = $(this).val();
+    $('#upgrades > div').each(function(){
+      var cat = $(this).data('cat');
+      $(this).find('.tier-list').each(function(){
+        var ug = $(this).data('ug');
+        var progress = 0;
+        if( typeof memo.stats[$(this).data('stat')] !== 'undefined' ){
+          progress = memo.stats[$(this).data('stat')];
+        }
+        var estimate = progressInXDays(days, progress);
+        $(this).find('li').each(function(){
+          var $tier = $(this);
+          var n = $tier.data('tier');
+          var target = $tier.data('challenge');
+          $tier.removeClass('avail');
+          if( !$(this).hasClass('have') && estimate >= target ){
+            $tier.addClass('avail');
+          }
+          var daysToUnlock = daysToTarget(progress, target);
+          $(this).attr({ title: daysToUnlock, alt: daysToUnlock });
+        });
+      });
+    });
+    updateAvailCount();
+  });
+
+  $('#upgrades').on('click', '.tier-list li.avail', function(){
+    if( $(this).closest('.branch').hasClass('locked') ){ return; }
+    if( $(this).hasClass('want') ){
+      $(this).nextAll().add(this).removeClass('want');
+    } else {
+      $(this).prevAll().not('.have').add(this).addClass('want');
+    }
+    var total = 0;
+    $('li.want').each(function(){
+      var m = $(this).closest('.branch').data('multiplier');
+      total += $(this).data('base_cost') * m;
+    });
+    var wantcount = $('li.want').length;
+    $('#wantCount').text(numberWithCommas(wantcount));
+    $('#wantCost').text(numberWithCommas(total));
+    var totalcount = wantcount + parseInt($('#haveCount').text().replace(/,/g, ''));
+    $('#pretendHaveCount').text(numberWithCommas(totalcount));
+    var havecost = parseInt($('#haveCost').text().replace(/,/g, ''));
+    $('#totalCost').text(numberWithCommas(total + havecost));
+    handleBranchCount();
+    updateAvailCount();
+  });
+
+  function daysSinceRelease(){
+    if( typeof memo.daysSinceRelease !== 'undefined' ){
+      return memo.daysSinceRelease;
+    }
+    var mspday = 1000*60*60*24;
+    var release = new Date(2017, 0, 17);
+    var now = new Date();
+    var msdiff = now.getTime() - release.getTime();
+    memo.daysSinceRelease = Math.ceil(msdiff/mspday);
+    return daysSinceRelease();
+  }
+
+  function daysToTarget(progress, target){
+    if( progress == 0 ){ return 0; }
+    return Math.max(Math.ceil((target - progress) / perDay(progress)), 0);
+  }
+
+  function debug(obj){
+    $('#debug').val(JSON.stringify(obj));
+    $('#debug').show();
+  }
+
+  function drawUpgrades(){
+    $.each(memo.specialistUpgrades, function(cat, upgrades){
+      var wrapper = $('<div>').data('cat', cat).addClass('branch');
+      var ugwrap = $('<div>').hide();
+      var header = $('<h3>').text(cat).click(function(){ ugwrap.toggle(); }).append($('<span class="multiplier">').css('padding-left', '15px'));
+      wrapper.append(header).append(ugwrap);
+      $.each(upgrades, function(ug, tiers){
+        ugwrap.append($('<h4>').text(ug));
+        var tierList = $('<ul>').addClass('tier-list').data('ug', ug);
+        ugwrap.append(tierList);
+        $.each(tiers, function(i, t){
+          tierList.append($('<li>').data(t).data('tier', i+1));
+          tierList.data('stat', t['stat']);
+        });
+      });
+      $('#upgrades').append(wrapper);
+    });
+    $('#upgrades').sortable({
+      handle: 'h3'
+    });
+    $('#upgrades').on('sortstop', function(e, ui){
+      $('#upgrades > div').each(function(){
+        var m = Math.pow(2, $(this).index());
+        $(this).data('multiplier', m);
+        $(this).find('span.multiplier').text('Cost x'+m);
+      });
+      recalcCosts();
+      handleBranchCount();
+      updateAvailCount();
+    }).trigger('sortstop');
+  }
+
+  function handleBranchCount(){
+    var branchUpgradeReq = [0,20,45,75,110,150];
+    var n = parseInt($('#pretendHaveCount').text().replace(/,/g, ''));
+    var b = 0;
+    $.each(branchUpgradeReq, function(idx, c){
+      if( n >= c ){
+        b += 1;
+      } else {
+        return false;
+      }
+    });
+    $('.branch').addClass('locked');
+    $('.branch').slice(0,b).removeClass('locked');
+    $('.branch.locked').find('li.want').removeClass('want');
+  }
+
+  function numberWithCommas(x){
+    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function parseChallengeAmount(c){
+    if( c == 'No challenge' ){
+      return 0;
+    }
+    return parseInt(c.replace(/[^0-9]/g, ''));
+  }
+
+  function parseChallengeStat(c){
+    return challengeStatMap()[c.replace(/[\d,\s]/g, '')];
+  }
+
+  function parseUpgrades(upgrades){
+    var specialistUpgrades = {};
+    $.each(upgrades, function(n,us){
+      var b = us['1']['branch'];
+      if( b == 'Core' ){ return 'next'; }
+      if( !specialistUpgrades.hasOwnProperty(b) ){
+        specialistUpgrades[b] = {};
+      }
+      var limb = [];
+      $.each(us, function(ni,u){
+        limb.push({ base_cost: u['base_cost'], challenge: parseChallengeAmount(u['challenge']), stat: parseChallengeStat(u['challenge']) });
+      });
+      specialistUpgrades[b][us['1']['name'].replace(/ I$/, '')] = limb;
+    });
+    return specialistUpgrades;
+  }
+
+  function perDay(n){
+    return n/daysSinceRelease();
+  }
+
+  /* Number of days from now, current progress */
+  function progressInXDays(x, n){
+    return (x * perDay(n)) + n;
+  }
+
+  function pullData(){
+    $.getJSON('https://api.torn.com/faction/'+$('#factionid').val(),
+      { selections: 'stats,upgrades', key: $('#apikey').val() },
+      function(data){
+        memo.stats = data['stats'];
+        /* Stats that are time based are tracked in seconds, but challenge amounts are in hours, so convert now. */
+        $.each(challengesInTime(), function(i,stat){
+          memo.stats[stat] /= 3600;
+        });
+        var totalHave = 0;
+        $.each(data['upgrades'], function(n, upgrade){
+          var b = upgrade['branch'];
+          if( b == 'Core' ){ return 'next'; }
+          var name = upgrade['name'].replace(/ [A-Z]+$/, '');
+          var level = upgrade['level'];
+          $('#upgrades > div').filter(function(){
+            return $(this).data('cat') == b;
+          }).find('.tier-list').filter(function(){
+            return $(this).data('ug') == name;
+          }).find('li').slice(0,level).addClass('have');
+          totalHave += level;
+        });
+        memo.total_ugs = totalHave;
+        $('#haveCount').text(numberWithCommas(totalHave));
+        $('#pretendHaveCount').text(numberWithCommas(totalHave));
+        $('li.want').removeClass('want');
+        handleBranchCount();
+        recalcCosts();
+        $('#days').change();
+      }
+    ).fail(tornAPIError);
+  }
+
+  function recalcCosts(){
+    var want = 0;
+    var have = 0;
+    $('li.want').each(function(){
+      var m = $(this).closest('.branch').data('multiplier');
+      want += $(this).data('base_cost') * m;
+    });
+    $('li.have').each(function(){
+      var m = $(this).closest('.branch').data('multiplier');
+      have += $(this).data('base_cost') * m;
+    });
+    $('#wantCost').text(numberWithCommas(want));
+    $('#haveCost').text(numberWithCommas(have));
+    $('#totalCost').text(numberWithCommas(have + want));
+  }
+
+  function tornAPIError( event, jqxhr, settings, thrownError ){
+    alert('oops');
+    console.log(arguments);
+  }
+
+  function updateAvailCount(){
+    $('#availCount').text(numberWithCommas($('.branch').not('.locked').find('li.avail').length));
+  }
+
+  function challengeStatMap(){
+    if( typeof memo.challengeStatMap !== 'undefined' ){
+      return memo.challengeStatMap;
+    }
+    memo.challengeStatMap = {
+      "Commitoffences": "criminaloffences",
+      "Nochallenge": "",
+      "Receivejailsentences": "jails",
+      "Bustpeoplefromjail": "busts",
+      "Utilizehoursofmedicalcooldown": "medicalcooldownused",
+      "Revivepeople": "revives",
+      "Recoverlifeusingmedicalitems": "medicalitemrecovery",
+      "Receivehoursofhospitaltime": "hosptimereceived",
+      "Usebagsofcandy": "candyused",
+      "Usecansofenergydrink": "energydrinkused",
+      "Usebottlesofalcohol": "alcoholused",
+      "Takedrugs": "drugsused",
+      "Overdosetimes": "drugoverdoses",
+      "Hunttimes": "hunting",
+      "Receive$inCaymaninterest": "",
+      "Achievehoursofflight": "traveltime",
+      "Rehabtimes": "rehabs",
+      "Spendenergyonstrengthtraining": "gymstrength",
+      "Spendenergyonspeedtraining": "gymspeed",
+      "Spendenergyondefensetraining": "gymdefense",
+      "Spendenergyondexteritytraining": "gymdexterity",
+      "Putopponentsinhospitalforhours": "hosptimegiven",
+      "Dealdamage": "attacksdamage",
+      "Achievedamaginghits": "attacksdamagehits",
+      "Windamagereceivingattacksordefends": "attacksdamaging",
+      "Runawaytimes": "attacksrunaway"
+    };
+    return challengeStatMap();
+  }
+
+  function challengesInTime(){
+    return ['medicalcooldownused','hosptimereceived','traveltime','hosptimegiven'];
+  }
+});
+</script>
