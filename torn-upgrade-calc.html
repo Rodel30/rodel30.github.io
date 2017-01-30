@@ -103,7 +103,10 @@ $(document).ready(function(){
             $tier.addClass('avail');
           }
           var daysToUnlock = daysToTarget(progress, target);
-          $(this).attr({ title: daysToUnlock, alt: daysToUnlock });
+          var m = $(this).closest('.branch').data('multiplier');
+          var cost = $(this).data('base_cost') * m;
+          var note = 'Days: '+ daysToUnlock +' Cost: '+numberWithCommas(cost);
+          $(this).attr({ title: note, alt: note });
         });
       });
     });
@@ -184,6 +187,9 @@ $(document).ready(function(){
       recalcCosts();
       handleBranchCount();
       updateAvailCount();
+      if( typeof memo.stats !== 'undefined' ){
+        $('#days').change();
+      }
     }).trigger('sortstop');
   }
 
