@@ -52,11 +52,15 @@ h4 {
 <div>
   Number of days: <input type="number" id="days" value="7">
 </div>
+<div>
+  Simulate from Reset: <input type="checkbox" id="reset">
+</div>
 <ul style="list-style: none;">
   <li>Current #: <span id="haveCount">0</span></li>
   <li>Avail #: <span id="availCount">0</span></li>
   <li>Selected #: <span id="wantCount">0</span></li>
   <li>Total w/ Selected #: <span id="pretendHaveCount">0</span></li>
+  <li>Core Upgrades Cost (included in Current Cost): <span id="coreCost">0</span></li>
   <li>Current Cost: <span id="haveCost">0</span></li>
   <li>Selected Upgrade Cost: <span id="wantCost">0</span></li>
   <li>Total Cost: <span id="totalCost">0</span></li>
@@ -66,7 +70,9 @@ h4 {
 <script>
 $(document).ready(function(){
   $('#debug').hide();
-  var memo = {};
+  var memo = {},
+    coreUpgrades = {}
+    coreCost = 0;
 
   $('#getData').click(function(){
     if( typeof memo.specialistUpgrades === 'undefined' ){
@@ -110,6 +116,22 @@ $(document).ready(function(){
         });
       });
     });
+    updateAvailCount();
+  });
+
+  $("#reset").change(function(){
+    var checked = $(this).is(':checked');
+    if( checked ){
+      $('.have').removeClass('have').addClass('have-off').addClass('avail');
+      $('#haveCount').text('0');
+      $('#pretendHaveCount').text(0)
+    } else {
+      $('.have-off').removeClass('have-off want').addClass('have').removeClass('avail');
+      $('#haveCount').text($('.have').length);
+      $('#pretendHaveCount').text(numberWithCommas($('.have, .want').length));
+    }
+    recalcCosts();
+    handleBranchCount();
     updateAvailCount();
   });
 
@@ -228,7 +250,14 @@ $(document).ready(function(){
     var specialistUpgrades = {};
     $.each(upgrades, function(n,us){
       var b = us['1']['branch'];
-      if( b == 'Core' ){ return 'next'; }
+      if( b == 'Core' ){
+        var ugName = us['1']['name'].replace(/ I$/, '');
+        coreUpgrades[ugName] = [];
+        $.each(us, function(ni,u){
+          coreUpgrades[ugName].push(u['base_cost']);
+        });
+        return 'next';
+      }
       if( !specialistUpgrades.hasOwnProperty(b) ){
         specialistUpgrades[b] = {};
       }
@@ -262,9 +291,12 @@ $(document).ready(function(){
         var totalHave = 0;
         $.each(data['upgrades'], function(n, upgrade){
           var b = upgrade['branch'];
-          if( b == 'Core' ){ return 'next'; }
-          var name = upgrade['name'].replace(/ [A-Z]+$/, '');
+          var name = upgrade['name'].replace(/ [XVI]+$/, '');
           var level = upgrade['level'];
+          if( b == 'Core' ){
+            coreCost += coreUpgrades[name].slice(0, level).reduce(function(total, cost){ return total + cost; }, 0);
+            return 'next';
+          }
           $('#upgrades > div').filter(function(){
             return $(this).data('cat') == b;
           }).find('.tier-list').filter(function(){
@@ -278,7 +310,9 @@ $(document).ready(function(){
         $('li.want').removeClass('want');
         handleBranchCount();
         recalcCosts();
+        $('#coreCost').text(numberWithCommas(coreCost));
         $('#days').change();
+        $("#reset").change();
       }
     ).fail(tornAPIError);
   }
@@ -294,6 +328,7 @@ $(document).ready(function(){
       var m = $(this).closest('.branch').data('multiplier');
       have += $(this).data('base_cost') * m;
     });
+    have += coreCost;
     $('#wantCost').text(numberWithCommas(want));
     $('#haveCost').text(numberWithCommas(have));
     $('#totalCost').text(numberWithCommas(have + want));
