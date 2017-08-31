@@ -184,7 +184,10 @@ $(document).ready(function(){
     $.each(memo.specialistUpgrades, function(cat, upgrades){
       var wrapper = $('<div>').data('cat', cat).addClass('branch');
       var ugwrap = $('<div>').hide();
-      var header = $('<h3>').text(cat).click(function(){ ugwrap.toggle(); }).append($('<span class="multiplier">').css('padding-left', '15px'));
+      var header = $('<h3>').text(cat).click(function(){ ugwrap.toggle(); })
+        .append($('<span class="multiplier">').css('padding-left', '15px'))
+        .append($('<span class="branch-cost-raw">').css('padding-left', '15px'))
+        .append($('<span class="branch-cost-total">').css('padding-left', '15px'));
       wrapper.append(header).append(ugwrap);
       $.each(upgrades, function(ug, tiers){
         ugwrap.append($('<h4>').text(ug));
@@ -320,13 +323,20 @@ $(document).ready(function(){
   function recalcCosts(){
     var want = 0;
     var have = 0;
-    $('li.want').each(function(){
-      var m = $(this).closest('.branch').data('multiplier');
-      want += $(this).data('base_cost') * m;
-    });
-    $('li.have').each(function(){
-      var m = $(this).closest('.branch').data('multiplier');
-      have += $(this).data('base_cost') * m;
+    $('.branch').each(function(){
+      var m = $(this).data('multiplier');
+      var cw = 0;
+      var ch = 0;
+      $(this).find('li.want').each(function(){
+        cw += $(this).data('base_cost');
+      });
+      $(this).find('li.have').each(function(){
+        ch += $(this).data('base_cost');
+      });
+      want += cw * m;
+      have += ch * m;
+      $(this).find('.branch-cost-raw').text('Pre-Multiplier Cost: ' + numberWithCommas(cw+ch));
+      $(this).find('.branch-cost-total').text('Post-Multiplier Cost: ' + numberWithCommas((cw+ch) * m));
     });
     have += coreCost;
     $('#wantCost').text(numberWithCommas(want));
