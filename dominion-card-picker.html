@@ -2605,6 +2605,8 @@
   `);
 
   $(document).ready(function(){
+    drawOptions();
+
     $('#pick').click(function(){
       var usable = cards.filter(matchesCriteria),
         nusable = usable.length,
@@ -2622,9 +2624,7 @@
         }
       }
       displayCards(selected);
-    });
-
-    drawOptions();
+    }).click();
   });
 
   var displayCards = function(cs){
