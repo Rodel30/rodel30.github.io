@@ -34,15 +34,15 @@ async function loadData(){
   }
 
   async function apiRequest(pathPart) {
-    const response = await fetch('https://api.torn.com/torn/'+pathPart+'&key='+apikey);
+    const response = await fetch('https://api.torn.com/'+pathPart+'&key='+apikey);
     const jsonData = await response.json();
     return jsonData
   }
 
   const itemList = Object.values(stockItems).reduce((t, ids) => t.concat(ids), []);
-  const itemData = await apiRequest(itemList+'?selections=items').then(data => data.items);
+  const itemData = await apiRequest('torn/'+itemList+'?selections=items').then(data => data.items);
 
-  const stockData = await apiRequest('?selections=stocks').then(data => data.stocks);
+  const stockData = await apiRequest('torn/?selections=stocks').then(data => data.stocks);
 
   const monthizeReturn = (s, v) => 31 * v / s.benefit.frequency;
 
@@ -57,14 +57,14 @@ async function loadData(){
       } else {
         return t;
       }
-      t.push({ name: s.name, acronym: s.acronym, monthly_return: monthizeReturn(s, value), base_block_cost: (s.current_price * s.benefit.requirement) });
+      t.push({ stock_id: s.stock_id, name: s.name, acronym: s.acronym, monthly_return: monthizeReturn(s, value), base_block_cost: (s.current_price * s.benefit.requirement) });
       return t;
     }, []);
 
   const bbValues = [1,2,3,4,5].reduce(function(bbs, tier){
     const multiplier = 2**(tier-1);
     stockOut.map(function(s){
-      bbs.push({ name: s.name, acronym: s.acronym, tier: tier, monthly_return: Math.trunc(s.monthly_return), block_cost: Math.trunc(multiplier * s.base_block_cost), roi: ((s.monthly_return / (multiplier * s.base_block_cost)) * 100).toFixed(2) });
+      bbs.push({ stock_id: s.stock_id, name: s.name, acronym: s.acronym, tier: tier, monthly_return: Math.trunc(s.monthly_return), block_cost: Math.trunc(multiplier * s.base_block_cost), roi: ((s.monthly_return / (multiplier * s.base_block_cost)) * 100).toFixed(2) });
     });
     return bbs;
   }, []);
@@ -75,8 +75,14 @@ async function loadData(){
 
   const cols = ['name', 'acronym', 'tier', 'monthly_return', 'block_cost', 'roi'];
 
+  const userStocks = await apiRequest('user/?selections=stocks').then(data => data.stocks);
+
   sortedBBs.map(function(bb){
       const row = tbod.insertRow(-1);
+      const owned = userStocks.hasOwnProperty(bb.stock_id) && userStocks[bb.stock_id].hasOwnProperty('dividend') && userStocks[bb.stock_id].dividend.increment >= bb.tier;
+      if( owned ){
+        row.style.backgroundColor = 'lightgreen';
+      }
       cols.map(function(c){
           cell = row.insertCell(-1);
           cell.innerHTML = bb[c].toLocaleString("en-US");
